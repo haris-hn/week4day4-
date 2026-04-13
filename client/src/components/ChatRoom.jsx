@@ -14,6 +14,8 @@ import {
   Bell,
   Trash2,
   Settings,
+  Menu,
+  X,
 } from "lucide-react";
 
 const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
@@ -30,6 +32,7 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
   const [clearedAt, setClearedAt] = useState(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [newUsername, setNewUsername] = useState(user.username);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const [updateUserApi] = useUpdateUserMutation();
   const messagesEndRef = useRef(null);
@@ -316,7 +319,7 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
       </div>
       <div className="glass-container chat-app">
         {/* Sidebar */}
-        <div className="sidebar">
+        <div className={`sidebar ${isSidebarOpen ? "open" : ""}`}>
           <div className="sidebar-header">
             <div
               style={{
@@ -335,16 +338,31 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
               >
                 Global Chat
               </h2>
-              <div
-                className="avatar"
-                style={{
-                  width: "32px",
-                  height: "32px",
-                  fontSize: "0.8rem",
-                  margin: 0,
-                }}
-              >
-                {getInitials(user.username)}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <div
+                  className="avatar"
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    fontSize: "0.8rem",
+                    margin: 0,
+                  }}
+                >
+                  {getInitials(user.username)}
+                </div>
+                <button
+                  className="mobile-only"
+                  onClick={() => setIsSidebarOpen(false)}
+                  style={{
+                    background: "rgba(255, 255, 255, 0.1)",
+                    border: "none",
+                    padding: "6px",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <X size={20} color="var(--text-main)" />
+                </button>
               </div>
             </div>
           </div>
@@ -513,6 +531,18 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
         <div className="chat-window">
           <div className="chat-header">
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <button
+                className="mobile-only"
+                onClick={() => setIsSidebarOpen(true)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  padding: "4px",
+                  cursor: "pointer",
+                }}
+              >
+                <Menu size={24} color="var(--text-main)" />
+              </button>
               <div
                 className="avatar"
                 style={{

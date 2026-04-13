@@ -2,7 +2,7 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 
 export const chatApi = createApi({
     reducerPath: 'chatApi',
-    baseQuery: fetchBaseQuery({ baseUrl: 'http://localhost:5000/api' }),
+    baseQuery: fetchBaseQuery({ baseUrl: 'https://week4day4-production.up.railway.app/api' }),
     tagTypes: ['User', 'Message'],
     endpoints: (builder) => ({
         getUsers: builder.query({
