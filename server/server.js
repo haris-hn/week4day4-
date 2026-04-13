@@ -149,14 +149,32 @@ app.put("/api/users/:id", async (req, res) => {
   }
 });
 
-// 3. Get Recent Messages
+// 3. Get Recent Global Messages
 app.get("/api/messages", async (req, res) => {
   try {
-    const messages = await Message.find()
+    const messages = await Message.find({ recipient: null })
       .populate("sender", "username")
       .sort({ createdAt: -1 })
       .limit(50);
     res.status(200).json(messages.reverse());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. Get Direct Messages between two users
+app.get("/api/messages/direct/:userId/:otherId", async (req, res) => {
+  try {
+    const { userId, otherId } = req.params;
+    const messages = await Message.find({
+      $or: [
+        { sender: userId, recipient: otherId },
+        { sender: otherId, recipient: userId },
+      ],
+    })
+      .populate("sender", "username")
+      .sort({ createdAt: 1 });
+    res.status(200).json(messages);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -168,6 +186,7 @@ io.on("connection", (socket) => {
 
   socket.on("user_join", async (userId) => {
     socket.userId = userId;
+    socket.join(userId); // Join personal room for DMs
     const user = await User.findByIdAndUpdate(
       userId,
       { online: true },
@@ -178,26 +197,43 @@ io.on("connection", (socket) => {
       username: user ? user.username : "Unknown",
       online: true,
     });
-    console.log(`User ${userId} joined`);
+    console.log(`User ${userId} joined and joined room ${userId}`);
   });
 
   socket.on("send_message", async (data) => {
     try {
-      const { sender, text } = data;
-      const newMessage = await Message.create({ sender, text });
+      const { sender, text, recipient } = data;
+      const newMessage = await Message.create({ sender, text, recipient });
       const populatedMessage = await newMessage.populate("sender", "username");
-      io.emit("receive_message", populatedMessage);
+      
+      if (recipient) {
+        // Direct Message: Emit to both recipient room and sender room
+        io.to(recipient).to(sender).emit("receive_message", populatedMessage);
+      } else {
+        // Global Message: Broadcast to everyone
+        io.emit("receive_message", populatedMessage);
+      }
     } catch (error) {
       console.error("Error sending message:", error);
     }
   });
 
   socket.on("typing_start", (data) => {
-    socket.broadcast.emit("user_typing_start", data);
+    if (data.recipient) {
+      io.to(data.recipient).emit("user_typing_start", data);
+    } else {
+      socket.broadcast.emit("user_typing_start", data);
+    }
   });
 
-  socket.on("typing_stop", (userId) => {
-    socket.broadcast.emit("user_typing_stop", userId);
+  socket.on("typing_stop", (data) => {
+    const userId = data.userId || data;
+    const recipient = data.recipient || null;
+    if (recipient) {
+      io.to(recipient).emit("user_typing_stop", userId);
+    } else {
+      socket.broadcast.emit("user_typing_stop", userId);
+    }
   });
 
   socket.on("disconnect", async () => {

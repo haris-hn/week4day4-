@@ -37,6 +37,10 @@ export const chatApi = createApi({
             }),
             invalidatesTags: ['User'],
         }),
+        getDirectMessages: builder.query({
+            query: ({ userId, otherId }) => `/messages/direct/${userId}/${otherId}`,
+            providesTags: ['Message'],
+        }),
     }),
 });
 
@@ -45,5 +49,6 @@ export const {
     useGetMessagesQuery, 
     useLoginUserMutation,
     useRegisterUserMutation,
-    useUpdateUserMutation
+    useUpdateUserMutation,
+    useGetDirectMessagesQuery
 } = chatApi;

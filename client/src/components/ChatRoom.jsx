@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   useGetUsersQuery,
   useGetMessagesQuery,
+  useGetDirectMessagesQuery,
   useUpdateUserMutation,
 } from "../store/api";
 import { useSocket } from "../hooks/useSocket";
@@ -33,6 +34,8 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [newUsername, setNewUsername] = useState(user.username);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null); // null means Global Chat
+  const [unreadDMs, setUnreadDMs] = useState({}); // { userId: count }
 
   const [updateUserApi] = useUpdateUserMutation();
   const messagesEndRef = useRef(null);
@@ -88,8 +91,19 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
   };
 
   const { data: users = [], refetch: refetchUsers } = useGetUsersQuery();
-  const { data: history = [], isLoading: historyLoading } =
-    useGetMessagesQuery();
+  
+  // Conditionally fetch history based on selected context
+  const { data: globalHistory = [], isLoading: globalLoading } = useGetMessagesQuery(undefined, {
+    skip: !!selectedUser
+  });
+  
+  const { data: dmHistory = [], isLoading: dmLoading } = useGetDirectMessagesQuery(
+    { userId: user._id, otherId: selectedUser?._id },
+    { skip: !selectedUser }
+  );
+
+  const history = selectedUser ? dmHistory : globalHistory;
+  const historyLoading = selectedUser ? (dmLoading || !dmHistory) : globalLoading;
 
   const emojis = [
     "😊",
@@ -111,10 +125,28 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
       socket.emit("user_join", user._id);
 
       socket.on("receive_message", (newMessage) => {
-        setLocalMessages((prev) => [...prev, newMessage]);
+        // Handle unread DM notifications
+        if (newMessage.recipient === user._id && (!selectedUser || selectedUser._id !== newMessage.sender?._id)) {
+          setUnreadDMs(prev => ({
+            ...prev,
+            [newMessage.sender._id]: (prev[newMessage.sender._id] || 0) + 1
+          }));
+        }
+
+        // Context-aware local message update
+        const isGlobal = !newMessage.recipient && !selectedUser;
+        const isCurrentDM = selectedUser && (
+          (newMessage.sender?._id === user._id && newMessage.recipient === selectedUser._id) ||
+          (newMessage.sender?._id === selectedUser._id && newMessage.recipient === user._id)
+        );
+
+        if (isGlobal || isCurrentDM) {
+          setLocalMessages((prev) => [...prev, newMessage]);
+        }
+
         if (newMessage.sender?._id !== user._id) {
           addNotification(
-            `New message from ${newMessage.sender?.username}`,
+            `New message from ${newMessage.sender?.username}${newMessage.recipient ? ' (Private)' : ''}`,
             "info",
           );
         }
@@ -167,18 +199,36 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // Clear local messages when switching chat context
+  useEffect(() => {
+    setLocalMessages([]);
+    if (selectedUser) {
+      setUnreadDMs(prev => ({
+        ...prev,
+        [selectedUser._id]: 0
+      }));
+    }
+  }, [selectedUser]);
+
   const handleInputChange = (e) => {
     setMessage(e.target.value);
 
     if (!socket) return;
 
     // Typing logic
-    socket.emit("typing_start", { userId: user._id, username: user.username });
+    socket.emit("typing_start", { 
+      userId: user._id, 
+      username: user.username,
+      recipient: selectedUser?._id || null
+    });
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     typingTimeoutRef.current = setTimeout(() => {
-      socket.emit("typing_stop", user._id);
+      socket.emit("typing_stop", {
+        userId: user._id,
+        recipient: selectedUser?._id || null
+      });
     }, 2000);
   };
 
@@ -189,9 +239,13 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
     socket.emit("send_message", {
       sender: user._id,
       text: message.trim(),
+      recipient: selectedUser?._id || null,
     });
 
-    socket.emit("typing_stop", user._id);
+    socket.emit("typing_stop", {
+      userId: user._id,
+      recipient: selectedUser?._id || null
+    });
     setMessage("");
     setShowEmojis(false);
   };
@@ -317,6 +371,10 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
           </div>
         ))}
       </div>
+      <div
+        className={`sidebar-overlay ${isSidebarOpen ? "open" : ""}`}
+        onClick={() => setIsSidebarOpen(false)}
+      />
       <div className="glass-container chat-app">
         {/* Sidebar */}
         <div className={`sidebar ${isSidebarOpen ? "open" : ""}`}>
@@ -458,27 +516,69 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
 
           <div className="user-list">
             {activeTab === "users" ? (
-              users.map((u) => (
+              <>
+                {/* Global Chat Item */}
                 <div
-                  key={u._id}
-                  className={`user-item ${u._id === user._id ? "active" : ""}`}
+                  className={`user-item ${!selectedUser ? "active" : ""}`}
+                  onClick={() => {
+                    setSelectedUser(null);
+                    setIsSidebarOpen(false);
+                  }}
+                  style={{ borderBottom: "1px solid var(--glass-border)", marginBottom: "12px", paddingBottom: "12px" }}
                 >
-                  <div className="avatar">{getInitials(u.username)}</div>
-                  <div
-                    className={`status-dot ${u.online ? "status-online" : "status-offline"}`}
-                  />
+                  <div className="avatar" style={{ background: "var(--primary)" }}>G</div>
                   <div style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontSize: "0.9rem", fontWeight: 500 }}>
-                      {u.username} {u._id === user._id && "(You)"}
-                    </span>
-                    <span
-                      style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}
-                    >
-                      {u.online ? "Online" : "Offline"}
-                    </span>
+                    <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>Global Chat</span>
+                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>Public community chat</span>
                   </div>
                 </div>
-              ))
+
+                {users.map((u) => (
+                  <div
+                    key={u._id}
+                    className={`user-item ${selectedUser?._id === u._id ? "active" : ""}`}
+                    onClick={() => {
+                      if (u._id !== user._id) {
+                        setSelectedUser(u);
+                        setIsSidebarOpen(false);
+                      }
+                    }}
+                    style={{ 
+                      cursor: u._id === user._id ? "default" : "pointer",
+                      opacity: u._id === user._id ? 0.6 : 1
+                    }}
+                  >
+                    <div className="avatar">{getInitials(u.username)}</div>
+                    <div
+                      className={`status-dot ${u.online ? "status-online" : "status-offline"}`}
+                    />
+                    <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+                      <span style={{ fontSize: "0.9rem", fontWeight: 500 }}>
+                        {u.username} {u._id === user._id && "(You)"}
+                      </span>
+                      <span
+                        style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}
+                      >
+                        {u.online ? "Online" : "Offline"}
+                      </span>
+                    </div>
+                    {unreadDMs[u._id] > 0 && (
+                      <div 
+                        style={{ 
+                          background: "var(--primary)", 
+                          color: "white", 
+                          fontSize: "0.7rem", 
+                          padding: "2px 6px", 
+                          borderRadius: "10px",
+                          fontWeight: 700
+                        }}
+                      >
+                        {unreadDMs[u._id]}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
             ) : notificationLog.length === 0 ? (
               <div
                 style={{
@@ -548,17 +648,17 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
                 style={{
                   width: "36px",
                   height: "36px",
-                  background: "var(--primary)",
+                  background: selectedUser ? "linear-gradient(135deg, #6366f1, #a855f7)" : "var(--primary)",
                 }}
               >
-                G
+                {selectedUser ? getInitials(selectedUser.username) : "G"}
               </div>
               <div>
                 <h3 style={{ fontSize: "0.95rem", fontWeight: 600 }}>
-                  Global chat Community
+                  {selectedUser ? selectedUser.username : "Global Chat Community"}
                 </h3>
-                <p style={{ fontSize: "0.75rem", color: "var(--success)" }}>
-                  {users.filter((u) => u.online).length} online
+                <p style={{ fontSize: "0.75rem", color: selectedUser ? (selectedUser.online ? "var(--success)" : "var(--text-muted)") : "var(--success)" }}>
+                  {selectedUser ? (selectedUser.online ? "Online" : "Offline") : `${users.filter((u) => u.online).length} online`}
                 </p>
               </div>
             </div>
