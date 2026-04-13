@@ -203,12 +203,13 @@ io.on("connection", (socket) => {
   socket.on("send_message", async (data) => {
     try {
       const { sender, text, recipient } = data;
-      const newMessage = await Message.create({ sender, text, recipient });
+      const targetRecipient = recipient || null;
+      const newMessage = await Message.create({ sender, text, recipient: targetRecipient });
       const populatedMessage = await newMessage.populate("sender", "username");
       
-      if (recipient) {
+      if (targetRecipient) {
         // Direct Message: Emit to both recipient room and sender room
-        io.to(recipient).to(sender).emit("receive_message", populatedMessage);
+        io.to(targetRecipient).to(sender).emit("receive_message", populatedMessage);
       } else {
         // Global Message: Broadcast to everyone
         io.emit("receive_message", populatedMessage);

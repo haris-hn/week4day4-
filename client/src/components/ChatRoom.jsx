@@ -70,24 +70,56 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
     }
   };
 
-  const addNotification = (text, type = "info") => {
+  const addNotification = (text, type = "info", metadata = {}) => {
     const id = Date.now() + Math.random();
-    const newNotif = { id, text, type, time: new Date() };
+    const newNotif = { 
+      id, 
+      text, 
+      type, 
+      time: new Date(), 
+      read: false,
+      metadata 
+    };
 
     setNotifications((prev) => [...prev, newNotif]);
     setNotificationLog((prev) => [newNotif, ...prev]);
 
     // Play sound and update badging
     playNotificationSound();
-    setUnreadCount((prev) => {
-      // If we're not currently looking at the notifications tab, increment unread count
-      if (activeTab !== "notifications") return prev + 1;
-      return 0; // If we are looking at it, it stays 0
-    });
+    
+    // Only increment top-level bell if it's not currently open
+    if (activeTab !== "notifications") {
+      setUnreadCount((prev) => prev + 1);
+    }
 
     setTimeout(() => {
       setNotifications((prev) => prev.filter((n) => n.id !== id));
     }, 3000);
+  };
+
+  const handleNotificationClick = (notif) => {
+    // Mark as read
+    setNotificationLog(prev => prev.map(n => 
+      n.id === notif.id ? { ...n, read: true } : n
+    ));
+
+    // Redirect
+    if (notif.metadata?.senderId) {
+      if (notif.metadata.isDM) {
+        const sender = users.find(u => u._id.toString() === notif.metadata.senderId.toString());
+        if (sender) setSelectedUser(sender);
+      } else {
+        setSelectedUser(null);
+      }
+    }
+    
+    // UI polish
+    setIsSidebarOpen(false);
+  };
+
+  const markAllNotificationsRead = () => {
+    setNotificationLog(prev => prev.map(n => ({ ...n, read: true })));
+    setUnreadCount(0);
   };
 
   const { data: users = [], refetch: refetchUsers } = useGetUsersQuery();
@@ -125,29 +157,35 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
       socket.emit("user_join", user._id);
 
       socket.on("receive_message", (newMessage) => {
+        const senderId = newMessage.sender?._id?.toString() || newMessage.sender?.toString();
+        const recipientId = newMessage.recipient?.toString();
+        const currentUserId = user._id?.toString();
+        const selectedUserId = selectedUser?._id?.toString();
+
         // Handle unread DM notifications
-        if (newMessage.recipient === user._id && (!selectedUser || selectedUser._id !== newMessage.sender?._id)) {
+        if (recipientId === currentUserId && (!selectedUser || selectedUserId !== senderId)) {
           setUnreadDMs(prev => ({
             ...prev,
-            [newMessage.sender._id]: (prev[newMessage.sender._id] || 0) + 1
+            [senderId]: (prev[senderId] || 0) + 1
           }));
         }
 
         // Context-aware local message update
-        const isGlobal = !newMessage.recipient && !selectedUser;
+        const isGlobal = !recipientId && !selectedUser;
         const isCurrentDM = selectedUser && (
-          (newMessage.sender?._id === user._id && newMessage.recipient === selectedUser._id) ||
-          (newMessage.sender?._id === selectedUser._id && newMessage.recipient === user._id)
+          (senderId === currentUserId && recipientId === selectedUserId) ||
+          (senderId === selectedUserId && recipientId === currentUserId)
         );
 
         if (isGlobal || isCurrentDM) {
           setLocalMessages((prev) => [...prev, newMessage]);
         }
 
-        if (newMessage.sender?._id !== user._id) {
+        if (senderId !== currentUserId) {
           addNotification(
-            `New message from ${newMessage.sender?.username}${newMessage.recipient ? ' (Private)' : ''}`,
+            `New message from ${newMessage.sender?.username || 'User'}${recipientId ? ' (Private)' : ''}`,
             "info",
+            { senderId, isDM: !!recipientId }
           );
         }
       });
@@ -182,7 +220,7 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
         socket.off("user_typing_stop");
       }
     };
-  }, [socket, user._id, refetchUsers]);
+  }, [socket, user._id, refetchUsers, selectedUser]);
 
   // Clear unread count when switching to notification tab
   useEffect(() => {
@@ -371,11 +409,11 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
           </div>
         ))}
       </div>
-      <div
-        className={`sidebar-overlay ${isSidebarOpen ? "open" : ""}`}
-        onClick={() => setIsSidebarOpen(false)}
-      />
       <div className="glass-container chat-app">
+        <div
+          className={`sidebar-overlay ${isSidebarOpen ? "open" : ""}`}
+          onClick={() => setIsSidebarOpen(false)}
+        />
         {/* Sidebar */}
         <div className={`sidebar ${isSidebarOpen ? "open" : ""}`}>
           <div className="sidebar-header">
@@ -591,38 +629,61 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
                 No recent activity.
               </div>
             ) : (
-              notificationLog.map((n) => (
-                <div
-                  key={n.id}
-                  style={{
-                    padding: "12px",
-                    borderBottom: "1px solid var(--glass-border)",
-                    fontSize: "0.85rem",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "4px",
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <button 
+                  onClick={markAllNotificationsRead}
+                  style={{ 
+                    padding: '8px', 
+                    fontSize: '0.75rem', 
+                    background: 'transparent', 
+                    color: 'var(--primary)',
+                    textAlign: 'right',
+                    width: 'auto',
+                    alignSelf: 'flex-end',
+                    marginRight: '12px'
                   }}
                 >
-                  <span
+                  Mark all read
+                </button>
+                {notificationLog.map((n) => (
+                  <div
+                    key={n.id}
+                    onClick={() => handleNotificationClick(n)}
                     style={{
-                      color:
-                        n.type === "success"
-                          ? "var(--success)"
-                          : n.type === "warning"
-                            ? "var(--warning)"
-                            : "var(--info)",
-                      fontWeight: 500,
+                      padding: "12px",
+                      borderBottom: "1px solid var(--glass-border)",
+                      fontSize: "0.85rem",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "4px",
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                      background: n.read ? "transparent" : "rgba(99, 102, 241, 0.08)",
+                      borderLeft: n.read ? "none" : "3px solid var(--primary)"
                     }}
+                    className="notification-item"
                   >
-                    {n.text}
-                  </span>
-                  <span
-                    style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}
-                  >
-                    {n.time.toLocaleTimeString()}
-                  </span>
-                </div>
-              ))
+                    <span
+                      style={{
+                        color:
+                          n.type === "success"
+                            ? "var(--success)"
+                            : n.type === "warning"
+                              ? "var(--warning)"
+                              : "var(--info)",
+                        fontWeight: n.read ? 400 : 600,
+                      }}
+                    >
+                      {n.text}
+                    </span>
+                    <span
+                      style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}
+                    >
+                      {n.time.toLocaleTimeString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -632,16 +693,15 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
           <div className="chat-header">
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <button
-                className="mobile-only"
+                className="mobile-only sidebar-toggle"
                 onClick={() => setIsSidebarOpen(true)}
                 style={{
-                  background: "transparent",
                   border: "none",
-                  padding: "4px",
                   cursor: "pointer",
+                  marginRight: "8px"
                 }}
               >
-                <Menu size={24} color="var(--text-main)" />
+                <Menu size={20} color="#f8fafc" />
               </button>
               <div
                 className="avatar"
@@ -653,8 +713,15 @@ const ChatRoom = ({ user, onLogout, onUpdateUser }) => {
               >
                 {selectedUser ? getInitials(selectedUser.username) : "G"}
               </div>
-              <div>
-                <h3 style={{ fontSize: "0.95rem", fontWeight: 600 }}>
+              <div style={{ minWidth: 0 }}>
+                <h3 style={{ 
+                  fontSize: "0.95rem", 
+                  fontWeight: 600,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: "140px"
+                }}>
                   {selectedUser ? selectedUser.username : "Global Chat Community"}
                 </h3>
                 <p style={{ fontSize: "0.75rem", color: selectedUser ? (selectedUser.online ? "var(--success)" : "var(--text-muted)") : "var(--success)" }}>
