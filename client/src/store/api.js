@@ -1,0 +1,49 @@
+import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+
+export const chatApi = createApi({
+    reducerPath: 'chatApi',
+    baseQuery: fetchBaseQuery({ baseUrl: 'http://localhost:5000/api' }),
+    tagTypes: ['User', 'Message'],
+    endpoints: (builder) => ({
+        getUsers: builder.query({
+            query: () => '/users',
+            providesTags: ['User'],
+        }),
+        getMessages: builder.query({
+            query: () => '/messages',
+            providesTags: ['Message'],
+        }),
+        loginUser: builder.mutation({
+            query: (credentials) => ({
+                url: '/users/login',
+                method: 'POST',
+                body: credentials,
+            }),
+            invalidatesTags: ['User'],
+        }),
+        registerUser: builder.mutation({
+            query: (credentials) => ({
+                url: '/users/register',
+                method: 'POST',
+                body: credentials,
+            }),
+            invalidatesTags: ['User'],
+        }),
+        updateUser: builder.mutation({
+            query: ({ id, ...patch }) => ({
+                url: `/users/${id}`,
+                method: 'PUT',
+                body: patch,
+            }),
+            invalidatesTags: ['User'],
+        }),
+    }),
+});
+
+export const { 
+    useGetUsersQuery, 
+    useGetMessagesQuery, 
+    useLoginUserMutation,
+    useRegisterUserMutation,
+    useUpdateUserMutation
+} = chatApi;
